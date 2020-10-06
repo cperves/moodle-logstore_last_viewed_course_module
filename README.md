@@ -1,2 +1,10 @@
-# moodle-logstore_last_viewed_course_module
-a log store moodle plugin to filter log datas into a new table
+# last_viewed_course_module
+## Usage
+TODO
+## Install
+* extract this plugin into moodle admin/tool/ directory
+* run moodle update
+
+## Parameter
+* activate the plugin from moodle administration
+* change options if necessary
