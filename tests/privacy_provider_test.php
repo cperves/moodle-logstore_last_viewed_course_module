@@ -23,20 +23,22 @@
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 
-defined('MOODLE_INTERNAL') || die();
+namespace logstore_last_viewed_course_module;
+
 global $CFG;
 
+use context_module;
+use core_privacy\local\request\userlist;
 use core_privacy\tests\provider_testcase;
 use core_privacy\local\request\contextlist;
 use core_privacy\local\request\approved_contextlist;
-use core_privacy\local\request\transform;
 use core_privacy\local\request\writer;
-use \core_privacy\local\request\approved_userlist;
+use core_privacy\local\request\approved_userlist;
 use logstore_last_viewed_course_module\privacy\provider;
 
 require_once($CFG->libdir . '/tests/fixtures/events.php');
 
-class logstore_last_viewed_course_module_privacy_testcase extends \core_privacy\tests\provider_testcase {
+class privacy_provider_test extends provider_testcase {
 
     private $user1;
     private $user2;
@@ -49,16 +51,21 @@ class logstore_last_viewed_course_module_privacy_testcase extends \core_privacy\
     private $resourcecontext2;
     private $cmresource2;
 
+    protected function setUp() : void {
+        parent::setUp();
+        $this->setup_datas();
+    }
+
     /**
      * test get_users_in_context function
      */
     public function test_get_users_in_context() {
-        $this->setup_datas();
         $this->setUser($this->user1);
         resource_view($this->resource1, $this->course1, $this->cmresource1, $this->resourcecontext1);
         $this->setUser($this->user2);
         resource_view($this->resource1, $this->course1, $this->cmresource1, $this->resourcecontext1);
-        $userlist = new \core_privacy\local\request\userlist($this->resourcecontext1, 'logstore_last_viewed_course_module');
+        get_log_manager(true);
+        $userlist = new userlist($this->resourcecontext1, 'logstore_last_viewed_course_module');
         provider::get_users_in_context($userlist);
         $users = $userlist->get_users();
         $this->assertCount(2, $users);
@@ -72,10 +79,10 @@ class logstore_last_viewed_course_module_privacy_testcase extends \core_privacy\
      * @throws coding_exception
      */
     public function test_user_contextlist() {
-        $this->setup_datas();
         $this->setUser($this->user1);
         resource_view($this->resource1, $this->course1, $this->cmresource1, $this->resourcecontext1);
         resource_view($this->resource2, $this->course2, $this->cmresource2, $this->resourcecontext2);
+        get_log_manager(true);
         $contextlist = provider::get_contexts_for_userid($this->user1->id);
         $this->assertCount(2, $contextlist->get_contexts());
         $this->assertContains($this->resourcecontext1, $contextlist->get_contexts());
@@ -88,32 +95,34 @@ class logstore_last_viewed_course_module_privacy_testcase extends \core_privacy\
      * @throws coding_exception
      */
     public function test_export_user_data() {
-        $this->setup_datas();
         $this->setUser($this->user1);
         resource_view($this->resource1, $this->course1, $this->cmresource1, $this->resourcecontext1);
         resource_view($this->resource2, $this->course2, $this->cmresource2, $this->resourcecontext2);
-        $approvedcontextlist = new \core_privacy\tests\request\approved_contextlist(
+        get_log_manager(true);
+        $approvedcontextlist = new approved_contextlist(
                 $this->user1,
                 'logstore_last_viewed_module_course',
                 [$this->resourcecontext1->id, $this->resourcecontext2->id]
         );
         provider::export_user_data($approvedcontextlist);
-        $writer = \core_privacy\local\request\writer::with_context($this->resourcecontext1);
+        $writer = writer::with_context($this->resourcecontext1);
         $data = $writer->get_data([get_string('pluginname', 'logstore_last_viewed_course_module')]);
         $this->assertTrue($writer->has_any_data());
-        $this->assertInstanceOf('stdClass', $data);
+        $this->assertInstanceOf('stdClass'
+, $data);
         $this->assertTrue(property_exists($data, 'logstore_lastviewed_log_records'));
         $this->assertCount(1, $data->logstore_lastviewed_log_records);
         foreach ($data->logstore_lastviewed_log_records as $logstorelastviewedlogrecord) {
             $this->assertEquals($this->user1->id, $logstorelastviewedlogrecord->userid);
             $this->assertEquals($this->cmresource1->id, $logstorelastviewedlogrecord->cmid);
         }
-        \core_privacy\local\request\writer::reset();
+        writer::reset();
         provider::export_user_data($approvedcontextlist);
-        $writer = \core_privacy\local\request\writer::with_context($this->resourcecontext2);
+        $writer = writer::with_context($this->resourcecontext2);
         $data = $writer->get_data([get_string('pluginname', 'logstore_last_viewed_course_module')]);
         $this->assertTrue($writer->has_any_data());
-        $this->assertInstanceOf('stdClass', $data);
+        $this->assertInstanceOf('stdClass'
+, $data);
         $this->assertTrue(property_exists($data, 'logstore_lastviewed_log_records'));
         $this->assertCount(1, $data->logstore_lastviewed_log_records);
         foreach ($data->logstore_lastviewed_log_records as $logstorelastviewedlogrecord) {
@@ -127,7 +136,6 @@ class logstore_last_viewed_course_module_privacy_testcase extends \core_privacy\
      * @return void
      */
     public function test_add_contexts_for_userid() {
-        $this->setup_datas();
         $this->setUser($this->user1);
         $addedcontextlist = new contextlist();
         provider::add_contexts_for_userid($addedcontextlist, $this->user1->id);
@@ -135,6 +143,7 @@ class logstore_last_viewed_course_module_privacy_testcase extends \core_privacy\
         $this->assertCount(0, $contextlist);
         resource_view($this->resource1, $this->course1, $this->cmresource1, $this->resourcecontext1);
         resource_view($this->resource2, $this->course2, $this->cmresource2, $this->resourcecontext2);
+        get_log_manager(true);
         $addedcontextlist = new contextlist();
         provider::add_contexts_for_userid($addedcontextlist, $this->user1->id);
         $contextlist = provider::get_contexts_for_userid($this->user1->id);
@@ -145,23 +154,24 @@ class logstore_last_viewed_course_module_privacy_testcase extends \core_privacy\
     /**
      * Test add_userids_for_context function
      *
-     * @param \core_privacy\local\request\userlist $userlist The userlist to add the users to.
+     * @param userlist $userlist The userlist to add the users to.
      * @return void
      */
     public function test_add_userids_for_context() {
-        $this->setup_datas();
-        $userlist = new \core_privacy\local\request\userlist($this->resourcecontext1, 'logstore_last_viewed_course_module');
+        $userlist = new userlist($this->resourcecontext1, 'logstore_last_viewed_course_module');
         $userids = $userlist->get_userids();
         $this->assertEmpty($userids);
         $this->setUser($this->user1);
         resource_view($this->resource1, $this->course1, $this->cmresource1, $this->resourcecontext1);
         $this->setUser($this->user2);
         resource_view($this->resource1, $this->course1, $this->cmresource1, $this->resourcecontext1);
+        get_log_manager(true);
         provider::add_userids_for_context($userlist);
+        get_log_manager(true);
         $userids = $userlist->get_userids();
         $this->assertCount(2, $userids);
-        $this->assertContains($this->user1->id, $userids);
-        $this->assertContains($this->user2->id, $userids);
+        $this->assertContains((int)$this->user1->id, $userids);
+        $this->assertContains((int)$this->user2->id, $userids);
     }
 
     /**
@@ -169,13 +179,14 @@ class logstore_last_viewed_course_module_privacy_testcase extends \core_privacy\
      */
     public function test_delete_data_for_user() {
         global $DB;
-        $this->setup_datas();
         $this->setUser($this->user1);
         resource_view($this->resource1, $this->course1, $this->cmresource1, $this->resourcecontext1);
         resource_view($this->resource2, $this->course2, $this->cmresource2, $this->resourcecontext2);
+        get_log_manager(true);
         $this->setUser($this->user2);
         resource_view($this->resource1, $this->course1, $this->cmresource1, $this->resourcecontext1);
         resource_view($this->resource2, $this->course2, $this->cmresource2, $this->resourcecontext2);
+        get_log_manager(true);
         $this->assertCount(4, $DB->get_records('logstore_lastviewed_log'));
         $this->assertEquals(2, $DB->count_records('logstore_lastviewed_log', array('userid' => $this->user1->id)));
         $this->assertEquals(2, $DB->count_records('logstore_lastviewed_log', array('userid' => $this->user2->id)));
@@ -207,13 +218,14 @@ class logstore_last_viewed_course_module_privacy_testcase extends \core_privacy\
      */
     public function test_delete_data_for_all_users_in_context() {
         global $DB;
-        $this->setup_datas();
         $this->setUser($this->user1);
         resource_view($this->resource1, $this->course1, $this->cmresource1, $this->resourcecontext1);
         resource_view($this->resource2, $this->course2, $this->cmresource2, $this->resourcecontext2);
+        get_log_manager(true);
         $this->setUser($this->user2);
         resource_view($this->resource1, $this->course1, $this->cmresource1, $this->resourcecontext1);
         resource_view($this->resource2, $this->course2, $this->cmresource2, $this->resourcecontext2);
+        get_log_manager(true);
         $this->assertCount(4, $DB->get_records('logstore_lastviewed_log'));
         provider::delete_data_for_all_users_in_context($this->resourcecontext1);
         $this->assertCount(2, $DB->get_records('logstore_lastviewed_log'));
@@ -227,11 +239,11 @@ class logstore_last_viewed_course_module_privacy_testcase extends \core_privacy\
      */
     public function test_delete_data_for_userlist() {
         global $DB;
-        $this->setup_datas();
         $this->lauch_resourceview_for_users();
+        get_log_manager(true);
         $this->assertCount(4, $DB->get_records('logstore_lastviewed_log'));
         // Delete for resource1 context.
-        $userlist = new \core_privacy\local\request\approved_userlist(
+        $userlist = new approved_userlist(
                 $this->resourcecontext1, 'logstore_last_viewed_course_module', array($this->user1->id, $this->user2->id)
         );
         provider::delete_data_for_userlist($userlist);
@@ -252,11 +264,11 @@ class logstore_last_viewed_course_module_privacy_testcase extends \core_privacy\
         $this->user2 = $this->getDataGenerator()->create_user();
         $this->course1 = $this->getDataGenerator()->create_course();
         $this->resource1 = $this->getDataGenerator()->create_module('resource', array('course' => $this->course1));
-        $this->resourcecontext1 = context_module::instance($this->resource1->cmid);
+        $this->resourcecontext1 =  context_module::instance($this->resource1->cmid);
         $this->cmresource1 = get_coursemodule_from_instance('resource', $this->resource1->id);
         $this->course2 = $this->getDataGenerator()->create_course();
         $this->resource2 = $this->getDataGenerator()->create_module('resource', array('course' => $this->course2));
-        $this->resourcecontext2 = context_module::instance($this->resource2->cmid);
+        $this->resourcecontext2 =  context_module::instance($this->resource2->cmid);
         $this->cmresource2 = get_coursemodule_from_instance('resource', $this->resource2->id);
     }
 

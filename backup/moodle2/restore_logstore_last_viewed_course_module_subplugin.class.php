@@ -65,7 +65,7 @@ class restore_logstore_last_viewed_course_module_subplugin extends restore_tool_
             $data['contextid'] = $contextrecord->id;
         }
         $data['other'] = '';
-        $data = $this->process_log($data);
+        $data = $this->process_log($data, get_config('logstore_last_viewed_course', 'jsonformat'));
         if ($data) {
             // At this point contextid changed but not cmid, so need to construct a new object.
             if ($data->contextlevel == CONTEXT_MODULE) {

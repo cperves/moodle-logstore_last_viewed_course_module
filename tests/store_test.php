@@ -23,10 +23,19 @@
  * @license    http://www.gnu.org/copyleft/gpl.html GNU GPL v3 or later
  */
 
-defined('MOODLE_INTERNAL') || die();
+namespace logstore_last_viewed_course_module;
 
+use advanced_testcase;
+use context_course;
+use context_module;
+use context_system;
+use core\event\course_viewed;
+use core\session\manager;
+use core_component;
+use logstore_last_viewed_course_module\log\store;
+use logstore_last_viewed_course_module\task\cleanup_task;
 
-class logstore_last_viewed_course_moodle_store_testcase extends advanced_testcase {
+class store_test extends advanced_testcase {
     /**
      * @var bool Determine if we disabled the GC, so it can be re-enabled in tearDown.
      */
@@ -42,7 +51,10 @@ class logstore_last_viewed_course_moodle_store_testcase extends advanced_testcas
     private $resourcecontext2;
     private $cmresource2;
 
-
+    /**
+     * @throws coding_exception
+     * @throws dml_exception
+     */
     public function test_logstore_enabling() {
         $this->setup_datas();
         // Test all plugins are disabled by this command.
@@ -52,51 +64,63 @@ class logstore_last_viewed_course_moodle_store_testcase extends advanced_testcas
         $this->assertCount(0, $stores);
 
         // Enable logging plugin.
-        set_config('enabled_stores', 'logstore_last_viewed_course_module', 'tool_log');
-        $manager = get_log_manager(true);
+        $this->set_log_store(false);
 
         $stores = $manager->get_readers();
         $this->assertCount(1, $stores);
         $this->assertEquals(array('logstore_last_viewed_course_module'), array_keys($stores));
-        /** @var \logstore_last_viewed_course_module\log\store $store */
+        /** @var store $store */
         $store = $stores['logstore_last_viewed_course_module'];
         $this->assertInstanceOf('logstore_last_viewed_course_module\log\store', $store);
         $this->assertInstanceOf('tool_log\log\writer', $store);
-        $this->assertTrue($store->is_logging());
+        // This plugin is not Logging.
+        $this->assertFalse($store->is_logging());
     }
 
-    public function test_course_viewed() {
+    /**
+     * @param bool $jsonformat
+     * @throws coding_exception
+     * @throws dml_exception
+     * @dataProvider test_provider
+     */
+    public function test_course_viewed(bool $jsonformat) {
         global $DB;
-        $this->set_log_store();
+        $this->set_log_store($jsonformat);
         $this->setup_datas();
         $logs = $DB->get_records('logstore_lastviewed_log', array(), 'id ASC');
         $this->assertCount(0, $logs);
         $this->setCurrentTimeStart();
         set_config('courseviewreinit', 0, 'local_digital_training_account_services');
         $this->setUser($this->user2->id);
-        $event1 = \core\event\course_viewed::create(
-                array('context' => context_course::instance($this->course1->id)));
+        $event1 = course_viewed::create(
+            array('context' => context_course::instance($this->course1->id)));
         $event1->trigger();
         $logs = $DB->get_records('logstore_lastviewed_log', array(), 'id ASC');
         $this->assertCount(0, $logs);
         set_config('courseviewreinit', 1, 'local_digital_training_account_services');
-        $event1 = \core\event\course_viewed::create(
-                array('context' => context_course::instance($this->course1->id)));
+        $event1 = course_viewed::create(
+            array('context' => context_course::instance($this->course1->id)));
         $event1->trigger();
         $logs = $DB->get_records('logstore_lastviewed_log', array(), 'id ASC');
         $this->assertCount(1, $logs);
     }
 
-    public function test_module_viewed() {
+    /**
+     * @param bool $jsonformat
+     * @throws coding_exception
+     * @throws dml_exception
+     * @dataProvider test_provider
+     */
+    public function test_module_viewed(bool $jsonformat) {
         global $DB;
-        $this->set_log_store();
+        $this->set_log_store($jsonformat);
         $this->setup_datas();
         $logs = $DB->get_records('logstore_lastviewed_log', array(), 'id ASC');
         $this->assertCount(0, $logs);
         $this->setCurrentTimeStart();
         $this->setUser($this->user1);
         $this->assertEquals(0, $DB->count_records('logstore_lastviewed_log'));
-        resource_view($this->resource2, $this->course2, $this->cmresource2, context_module::instance($this->resource2->cmid));
+        resource_view($this->resource2, $this->course2, $this->cmresource2,  context_module::instance($this->resource2->cmid));
         get_log_manager(true);
         $logs = $DB->get_records('logstore_lastviewed_log', array(), 'id ASC');
         $this->assertCount(1, $logs);
@@ -108,30 +132,42 @@ class logstore_last_viewed_course_moodle_store_testcase extends advanced_testcas
 
     }
 
-    public function test_module_viewed_loginas() {
+    /**
+     * @param bool $jsonformat
+     * @throws coding_exception
+     * @throws dml_exception
+     * @dataProvider test_provider
+     */
+    public function test_module_viewed_loginas(bool $jsonformat) {
         global $DB;
-        $this->set_log_store();
+        $this->set_log_store($jsonformat);
         $this->setup_datas();
         $logs = $DB->get_records('logstore_lastviewed_log', array(), 'id ASC');
         $this->assertCount(0, $logs);
         $this->setCurrentTimeStart();
         $this->setAdminUser();
-        \core\session\manager::loginas($this->user1->id, context_system::instance());
-        $this->assertTrue(\core\session\manager::is_loggedinas());
-        resource_view($this->resource2, $this->course2, $this->cmresource2, context_module::instance($this->resource2->cmid));
+        manager::loginas($this->user1->id, context_system::instance());
+        $this->assertTrue(manager::is_loggedinas());
+        resource_view($this->resource2, $this->course2, $this->cmresource2,  context_module::instance($this->resource2->cmid));
         get_log_manager(true);
         $logs = $DB->get_records('logstore_lastviewed_log', array(), 'id ASC');
         $this->assertCount(0, $logs);
     }
 
-    public function test_course_deleted() {
+    /**
+     * @param bool $jsonformat
+     * @throws coding_exception
+     * @throws dml_exception
+     * @dataProvider test_provider
+     */
+    public function test_course_deleted(bool $jsonformat) {
         global $DB;
         $this->setup_datas();
-        $this->set_log_store();
+        $this->set_log_store($jsonformat);
         $this->setUser($this->user1);
         $logs = $DB->get_records('logstore_lastviewed_log', array(), 'id ASC');
         $this->assertCount(0, $logs);
-        resource_view($this->resource2, $this->course2, $this->cmresource2, context_module::instance($this->resource2->cmid));
+        resource_view($this->resource2, $this->course2, $this->cmresource2,  context_module::instance($this->resource2->cmid));
         get_log_manager(true);
         $logs = $DB->get_records('logstore_lastviewed_log', array(), 'id ASC');
         $this->assertCount(1, $logs); // Other entry is for course 2.
@@ -144,14 +180,20 @@ class logstore_last_viewed_course_moodle_store_testcase extends advanced_testcas
         ob_end_clean();
     }
 
-    public function test_course_module_deleted() {
+    /**
+     * @param bool $jsonformat
+     * @throws coding_exception
+     * @throws dml_exception
+     * @dataProvider test_provider
+     */
+    public function test_course_module_deleted(bool $jsonformat) {
         global $DB;
         $this->setup_datas();
-        $this->set_log_store();
+        $this->set_log_store($jsonformat);
         $this->setUser($this->user1);
         $logs = $DB->get_records('logstore_lastviewed_log', array(), 'id ASC');
         $this->assertCount(0, $logs);
-        resource_view($this->resource2, $this->course2, $this->cmresource2, context_module::instance($this->resource2->cmid));
+        resource_view($this->resource2, $this->course2, $this->cmresource2,  context_module::instance($this->resource2->cmid));
         get_log_manager(true);
         $logs = $DB->get_records('logstore_lastviewed_log', array(), 'id ASC');
         $this->assertCount(1, $logs);
@@ -166,7 +208,7 @@ class logstore_last_viewed_course_moodle_store_testcase extends advanced_testcas
      */
     public function test_get_supported_reports() {
         $logmanager = get_log_manager();
-        $allreports = \core_component::get_plugin_list('report');
+        $allreports = core_component::get_plugin_list('report');
 
         $supportedreports = array(
             'report_log' => '/report/log',
@@ -214,12 +256,20 @@ class logstore_last_viewed_course_moodle_store_testcase extends advanced_testcas
         set_config('loglifetime', 1, 'logstore_last_viewed_course_module');
 
         $this->expectOutputString(" Deleted old log records from last_viewed_course_module log store.\n");
-        $clean = new \logstore_last_viewed_course_module\task\cleanup_task();
+        $clean = new cleanup_task();
         $clean->execute();
 
         $this->assertEquals(1, $DB->count_records('logstore_lastviewed_log'));
     }
 
+    // Provider
+
+    public static function test_provider(): array {
+        return [
+            [false],
+            [true]
+        ];
+    }
 
     /**
      * @param $course1
@@ -236,19 +286,22 @@ class logstore_last_viewed_course_moodle_store_testcase extends advanced_testcas
         $this->user2 = $this->getDataGenerator()->create_user();
         $this->course1 = $this->getDataGenerator()->create_course();
         $this->resource1 = $this->getDataGenerator()->create_module('resource', array('course' => $this->course1));
-        $this->resourcecontext1 = context_module::instance($this->resource1->cmid);
+        $this->resourcecontext1 =  context_module::instance($this->resource1->cmid);
         $this->cmresource1 = get_coursemodule_from_instance('resource', $this->resource1->id);
         $this->course2 = $this->getDataGenerator()->create_course();
         $this->resource2 = $this->getDataGenerator()->create_module('resource', array('course' => $this->course2));
-        $this->resourcecontext2 = context_module::instance($this->resource2->cmid);
+        $this->resourcecontext2 =  context_module::instance($this->resource2->cmid);
         $this->cmresource2 = get_coursemodule_from_instance('resource', $this->resource2->id);
         get_log_manager(true);
     }
 
-    private function set_log_store() {
+    private function set_log_store($jsonformat) {
         set_config('enabled_stores', '', 'tool_log');
         // Enable logging plugin.
         set_config('enabled_stores', 'logstore_last_viewed_course_module', 'tool_log');
+        set_config('jsonformat', $jsonformat ? 1 : 0, 'logstore_database');
+        set_config('buffersize', 0, 'logstore_last_viewed_course_module');
+        //set_config('logguests', 1, 'logstore_database');
         // Force reload.
         get_log_manager(true);
     }
